@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+if [ ! -d "unencrypted" ]; then
+    echo "Error: 'unencrypted' directory not found."
+    exit 1
+fi
+
+if [ -z "$(ls -A unencrypted)" ]; then
+    echo "Error: 'unencrypted' directory is empty."
+    exit 1
+fi
+
+# Prompt for password
+read -r -s -p "Enter encryption password: " PASSWORD
+echo
+read -r -s -p "Confirm encryption password: " PASSWORD_CONFIRM
+echo
+
+if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
+    echo "Error: Passwords do not match."
+    exit 1
+fi
+
+if [ -z "$PASSWORD" ]; then
+    echo "Error: Password cannot be empty."
+    exit 1
+fi
+
+echo "Encrypting..."
+
+# Tar and encrypt using AES-256-CBC with PBKDF2 (600k iterations)
+# Password passed via environment variable to avoid exposure in process listing
+export ENCRYPTION_PASSWORD="$PASSWORD"
+unset PASSWORD PASSWORD_CONFIRM
+
+tar -czf - -C . unencrypted | \
+    openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt \
+    -pass env:ENCRYPTION_PASSWORD -out encrypted
+
+unset ENCRYPTION_PASSWORD
+
+echo "Encryption complete."
+
+# Commit and push
+git add encrypted
+git commit -m "Update encrypted backup"
+
+for remote in $(git remote); do
+    echo "Pushing to $remote..."
+    git push "$remote" HEAD
+done
+
+# Delete unencrypted directory
+rm -rf unencrypted
+
+echo "Done. Unencrypted directory deleted."
